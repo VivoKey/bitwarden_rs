@@ -1,9 +1,9 @@
+use chrono::Utc;
 use num_traits::FromPrimitive;
 use rocket::request::{Form, FormItems, FromForm};
 use rocket::Route;
 use rocket_contrib::json::Json;
 use serde_json::Value;
-use chrono::Utc;
 
 use crate::api::core::two_factor::email::EmailTokenData;
 use crate::api::core::two_factor::{duo, email, yubikey};
@@ -97,7 +97,7 @@ fn _password_login(data: ConnectData, conn: DbConn, ip: ClientIp) -> JsonResult 
         )
     }
 
-    if !user.verified_at.is_some() && CONFIG.mail_enabled() && CONFIG.signups_verify() {
+    if user.verified_at.is_none() && CONFIG.mail_enabled() && CONFIG.signups_verify() {
         let now = Utc::now().naive_utc();
         if user.last_verifying_at.is_none() || now.signed_duration_since(user.last_verifying_at.unwrap()).num_seconds() > CONFIG.signups_verify_resend_time() as i64 {
             let resend_limit = CONFIG.signups_verify_resend_limit() as i32;
@@ -106,7 +106,7 @@ fn _password_login(data: ConnectData, conn: DbConn, ip: ClientIp) -> JsonResult 
                 // their email address, and we haven't sent them a reminder in a while...
                 let mut user = user;
                 user.last_verifying_at = Some(now);
-                user.login_verify_count = user.login_verify_count + 1;
+                user.login_verify_count += 1;
 
                 if let Err(e) = user.save(&conn) {
                     error!("Error updating user: {:#?}", e);
@@ -211,7 +211,7 @@ fn twofactor_auth(
 
     let twofactor_code = match data.two_factor_token {
         Some(ref code) => code,
-        None => err_json!(_json_err_twofactor(&twofactor_ids, user_uuid, conn)?),
+        None => err_json!(_json_err_twofactor(&twofactor_ids, user_uuid, conn)?, "2FA token not provided"),
     };
 
     let selected_twofactor = twofactors
@@ -237,7 +237,7 @@ fn twofactor_auth(
                 Some(ref code) if !CONFIG.disable_2fa_remember() && ct_eq(code, twofactor_code) => {
                     remember = 1; // Make sure we also return the token here, otherwise it will only remember the first time
                 }
-                _ => err_json!(_json_err_twofactor(&twofactor_ids, user_uuid, conn)?),
+                _ => err_json!(_json_err_twofactor(&twofactor_ids, user_uuid, conn)?, "2FA Remember token not provided"),
             }
         }
         _ => err!("Invalid two factor provider"),
