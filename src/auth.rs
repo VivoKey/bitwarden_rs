@@ -156,9 +156,7 @@ pub struct DeleteJWTClaims {
     pub sub: String,
 }
 
-pub fn generate_delete_claims(
-    uuid: String,
-) -> DeleteJWTClaims {
+pub fn generate_delete_claims(uuid: String) -> DeleteJWTClaims {
     let time_now = Utc::now().naive_utc();
     DeleteJWTClaims {
         nbf: time_now.timestamp(),
@@ -180,9 +178,7 @@ pub struct VerifyEmailJWTClaims {
     pub sub: String,
 }
 
-pub fn generate_verify_email_claims(
-    uuid: String,
-) -> DeleteJWTClaims {
+pub fn generate_verify_email_claims(uuid: String) -> DeleteJWTClaims {
     let time_now = Utc::now().naive_utc();
     DeleteJWTClaims {
         nbf: time_now.timestamp(),
@@ -430,11 +426,24 @@ pub struct ClientIp {
 impl<'a, 'r> FromRequest<'a, 'r> for ClientIp {
     type Error = ();
 
-    fn from_request(request: &'a Request<'r>) -> request::Outcome<Self, Self::Error> {
-        let ip = match request.client_ip() {
-            Some(addr) => addr,
-            None => "0.0.0.0".parse().unwrap(),
+    fn from_request(req: &'a Request<'r>) -> request::Outcome<Self, Self::Error> {
+        let ip = if CONFIG._ip_header_enabled() {
+            req.headers().get_one(&CONFIG.ip_header()).and_then(|ip| {
+                match ip.find(',') {
+                    Some(idx) => &ip[..idx],
+                    None => ip,
+                }
+                .parse()
+                .map_err(|_| warn!("'{}' header is malformed: {}", CONFIG.ip_header(), ip))
+                .ok()
+            })
+        } else {
+            None
         };
+
+        let ip = ip
+            .or_else(|| req.remote().map(|r| r.ip()))
+            .unwrap_or_else(|| "0.0.0.0".parse().unwrap());
 
         Outcome::Success(ClientIp { ip })
     }
